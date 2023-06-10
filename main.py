@@ -1,13 +1,15 @@
 #
 #
 #
+import asyncio
 import sys
 from typing import Optional
+
 import usb
 import usbtmc
 
 
-def main() -> int:
+async def main() -> int:
     # 通信対象の選択
     device: Optional[usb.core.Device] = choose_tmc_device()
     if device is None:
@@ -16,22 +18,58 @@ def main() -> int:
     # 通信路の確立
     print("Establish connection...")
     instrument = usbtmc.Instrument(device)
-    instrument.timeout = 2
+    instrument.timeout = 5
     instrument.open()
 
     # コマンドのやりとり
+    event_loop = asyncio.get_event_loop()
     end_request: bool = False
     while not end_request:
+        # コマンド入力 ^C, ^Dで終了
         try:
-            command = input(">>> ")
-            print(instrument.ask(command))
+            command: str = ""
+            while command == "":
+                command = input(">>> ")
         except (KeyboardInterrupt, EOFError):
+            print("abort")
             end_request = True
+            continue
+
+        # 通信メソッドは非同期コンテキストで呼び出し、完了するまでコンソールで遊ぶ
+        try:
+            ask_task = event_loop.run_in_executor(None, instrument.ask, command)
+            await console_wait_anim(ask_task)
+            print(ask_task.result())
+        except usb.core.USBTimeoutError:
+            print("Response timed out. please check command syntax or connection.")
+            continue
+        except usb.core.USBError as usberror:
+            print(f"Unexpected USB error: {usberror.strerror}")
+            end_request = True
+            continue
 
     # 終了
     print("Closing...")
     instrument.close()
     return 0
+
+
+async def console_wait_anim(task: asyncio.Future):
+    """引数に与えられたFutureが完了するまでコンソールでアニメーションする
+
+    Args:
+        task (asyncio.Future): 待機対象のFuture
+    """
+    keyframe_max = 4
+    keyframe_index = 0
+
+    while not task.done():
+        keyframe_index = (keyframe_index + 1) % keyframe_max
+        indicator = "." * keyframe_index + " " * (keyframe_max - 1 - keyframe_index)
+        print(f"{indicator}\r", end="")
+        await asyncio.sleep(0.1)
+
+    print(f"{' ' * keyframe_max}\r", end="")
 
 
 def choose_tmc_device() -> Optional[usb.core.Device]:
@@ -89,9 +127,8 @@ def choose_tmc_device() -> Optional[usb.core.Device]:
 if __name__ == "__main__":
     result = 0
     try:
-        result = main() or 0
+        event_loop = asyncio.get_event_loop()
+        result = event_loop.run_until_complete(main())
     except Exception as e:
         print(f"Unexpected exception occured in main(): {e}")
-        result = 1
-    finally:
         sys.exit(result)

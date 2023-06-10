@@ -85,6 +85,61 @@ POSITION2 -6.4E0;:MEASUREMENT:MEAS1:TYPE PWIDTH;SOURCE CH1;:MEASUREMENT:MEAS2…
 
 それでも、応答が得られるまで (正確には、`usbtmc.ask()`が返るまで) はメインスレッドがブロックされてしまいます。`KeyboardInterrupt` もいい感じに補足しづらいため、シェルとしても操作感がよくありません。
 
+そこで…
+
+### asyncioによる非同期処理
+
+TMCデバイスとの通信処理を非同期に持っていき、メインスレッドがブロックされないようにすることでこれを解決していきます。
+
+`usbtmc.Instrument` で定義されている関数 `read` や `write`、`ask` 等の関数は `async def` な関数ではないので、ただ `await instrument.ask()` とするだけでは結局スレッドがブロックされてしまいます(1敗)。
+そこで、`asyncio` の関数 `run_in_executor` によりこれら関数を非同期コンテキストで呼び出すように変更していきます。
+
+```python
+ask_task = event_loop.run_in_executor(None, instrument.ask, command)
+```
+
+このように記述することで、TMCデバイスのI/Oでメインスレッドがブロックされるのを防ぐことができます。
+また `ask_task` は `asyncio.Future` ですので、 `.done()` を見ることで通信が完了したかどうかを取得できます。
+
+このような関数を作り…
+
+```python
+async def console_wait_anim(task: asyncio.Future):
+    """引数に与えられたFutureが完了するまでコンソールでアニメーションする
+
+    Args:
+        task (asyncio.Future): 待機対象のFuture
+    """
+    keyframe_max = 4
+    keyframe_index = 0
+
+    while not task.done():
+        keyframe_index = (keyframe_index + 1) % keyframe_max
+        indicator = "." * keyframe_index + " " * (keyframe_max - 1 - keyframe_index)
+        print(f"{indicator}\r", end="")
+        await asyncio.sleep(0.1)
+
+    print(f"{' ' * keyframe_max}\r", end="")
+```
+
+引数に先程の `ask_task` を渡して `await` すれば、通信中にちょっとしたインジケータを表示することも可能です。
+
+※イメージ
+
+コマンド送信直後
+
+```
+>>> *LRN?
+...
+```
+
+↓ 完了
+
+```
+>>> *LRN?
+:HEADER 0;:VERBOSE 1;:DATA …(省略)
+```
+
 
 ## License
 
