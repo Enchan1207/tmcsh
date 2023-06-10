@@ -85,23 +85,21 @@ POSITION2 -6.4E0;:MEASUREMENT:MEAS1:TYPE PWIDTH;SOURCE CH1;:MEASUREMENT:MEAS2…
 
 それでも、応答が得られるまで (正確には、`usbtmc.ask()`が返るまで) はメインスレッドがブロックされてしまいます。`KeyboardInterrupt` もいい感じに補足しづらいため、シェルとしても操作感がよくありません。
 
-そこで…
-
 ### asyncioによる非同期処理
 
-TMCデバイスとの通信処理を非同期に持っていき、メインスレッドがブロックされないようにすることでこれを解決していきます。
+この問題を解決するために、TMCデバイスとの通信処理を全て非同期処理として実行することを考えます。
 
 `usbtmc.Instrument` で定義されている関数 `read` や `write`、`ask` 等の関数は `async def` な関数ではないので、ただ `await instrument.ask()` とするだけでは結局スレッドがブロックされてしまいます(1敗)。
-そこで、`asyncio` の関数 `run_in_executor` によりこれら関数を非同期コンテキストで呼び出すように変更していきます。
+そこで、`asyncio` の関数 `run_in_executor` によりこれら関数を非同期コンテキストで呼び出すように変更します。
 
 ```python
 ask_task = event_loop.run_in_executor(None, instrument.ask, command)
 ```
 
 このように記述することで、TMCデバイスのI/Oでメインスレッドがブロックされるのを防ぐことができます。
-また `ask_task` は `asyncio.Future` ですので、 `.done()` を見ることで通信が完了したかどうかを取得できます。
+また `ask_task` は `asyncio.Future` ですので、 `.done()` を見ることで通信が完了したかどうかを取得でき、また `.result()` により 本来の `usbtmc.Instrument.ask` の戻り値を得ることができます。
 
-このような関数を作り…
+さらに、このような関数を作り…
 
 ```python
 async def console_wait_anim(task: asyncio.Future):
