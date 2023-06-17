@@ -2,8 +2,8 @@
 #
 #
 import sys
-from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Optional, Union
 
 import usb
 import usbtmc
@@ -27,8 +27,8 @@ def main() -> int:
         print(f"Failed to establish connection with TMC device: {e}")
         return 1
 
-    # TMCデバイスとの通信をやってくれるエグゼキュータ
-    executor = ThreadPoolExecutor()
+    # TMCデバイスとの通信を担うエグゼキュータ
+    tmc_command_executor = ThreadPoolExecutor()
 
     # コマンドのやりとり
     end_request: bool = False
@@ -44,29 +44,29 @@ def main() -> int:
             continue
 
         # コマンドをエグゼキュータに投げる
-        future = executor.submit(instrument.ask, command)
-
-        def on_receive(future):
-            """受信完了時のコールバック
-
-            Args:
-                future (Future): エグゼキュータに投げたFutureオブジェクト
-            """
-            try:
-                result = future.result()
-                print(result)
-            except usb.core.USBTimeoutError:
-                print("Response timed out. please check command syntax or connection.")
-            except (usbtmc.usbtmc.UsbtmcException, usb.core.USBError) as unexpected_error:
-                print(f"Unexpected USB error: {unexpected_error}")
-
-        future.add_done_callback(on_receive)
+        response_future: Future = tmc_command_executor.submit(instrument.ask, command)
+        response_future.add_done_callback(on_receive_response)
 
     # 終了
     print("Closing...")
-    executor.shutdown()
+    tmc_command_executor.shutdown()
     instrument.close()
     return 0
+
+
+def on_receive_response(response_future: Future[Union[list, str, bytes]]):
+    """受信完了時のコールバック
+
+    Args:
+        future (Future): エグゼキュータに投げたFutureオブジェクト
+    """
+    try:
+        result = response_future.result()
+        print(result)
+    except usb.core.USBTimeoutError:
+        print("Response timed out. please check command syntax or connection.")
+    except (usbtmc.usbtmc.UsbtmcException, usb.core.USBError) as unexpected_error:
+        print(f"Unexpected USB error: {unexpected_error}")
 
 
 if __name__ == "__main__":
