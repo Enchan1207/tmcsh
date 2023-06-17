@@ -1,143 +1,93 @@
-# python-usbtmcをasyncでいい感じに使う
+# USB-TMC Shell
 
 ## Overview
 
- - 通信中に処理がブロックされるのは厳しい
- - ついでに `^C` とか `^D` とかで中断…とまではいかなくても安全に処理したい
- - スレッドでやればいいのはそれはそうだけど、ここはasyncioを使ってみよう
+Interactive command shell for USB Test and Measurement device Class (TMC) device.
 
-## Discussion
+## Installation
 
-### 基本的なやりとり
-
-`python-usbtmc` を用いてTMCデバイスと通信する場合、基本的にはこのようなコードになります。
-
-```python
-import sys
-from typing import Optional
-import usb
-import usbtmc
-
-def main() -> int:
-    # 通信対象の選択
-    device: Optional[usb.core.Device] = choose_tmc_device()
-    if device is None:
-        return 1
-
-    # 通信路の確立
-    print("Establish connection...")
-    instrument = usbtmc.Instrument(device)
-    instrument.timeout = 2
-    instrument.open()
-
-    # コマンドのやりとり
-    end_request: bool = False
-    while not end_request:
-        try:
-            command = input(">>> ")
-            print(instrument.ask(command))
-        except (KeyboardInterrupt, EOFError):
-            end_request = True
-
-    # 終了
-    print("Closing...")
-    instrument.close()
-    return 0
-```
-
-結果:
+It can be installed from GitHub using pip:
 
 ```
-% python main.py
+pip install git+https://github.com/Enchan1207/tmcsh
+```
+
+After installation, command `tmcsh` will be available.
+
+## Usage
+
+### 1. Choosing a communication device
+
+When you start `tmcsh`, you will be prompted to select a device.
+
+```
+$ tmcsh
+USB-TMC shell v0.1.0
 Connected USB-TMC devices:
   [0] Tektronix TDS2012B (0699:0367)
 Enter the index of the device you want to communicate with.
 Type 'r' to reload, ^C or ^D to abort.
-> 0
+>
+```
+
+Type index for communicate with:
+
+```
+0
+```
+
+After it, shell tries to establish connection.
+
+```
 Establish connection...
+```
+
+If that succeeds, you'll see a REPL-like prompt.
+
+```
+>>> 
+```
+
+### 2. Query the device
+
+You can send IEEE 488 common commands...
+
+```
 >>> *IDN?
 TEKTRONIX,TDS 2012B,C062851,CF:91.1CT FV:v22.01
+```
+
+```
 >>> *ESR?
-164
->>> LANG?
-JAPANESE
->>> Closing...
+128
 ```
 
-対話シェルっぽくやり取りできています。
-
-### タイムアウトとスレッドブロック
-
-しかし、*測定器を現在の状態に設定するのに必要な、すべてのコマンドのASCII文字列を返* すコマンド、`*LRN` などは処理に時間がかかることがあります。現状のコードでこのコマンドを実行すると、環境によってはタイムアウトで落ちてしまいます。
+model-specific commands...
 
 ```
-Establish connection...
->>> *LRN?
-Unexpected exception occured in main(): [Errno 60] Operation timed out
+>>> DATA?
+RPBINARY;REFA;CH2;1;2500;1
 ```
 
-タイムアウト時間を伸ばせば想定通りの応答が得られますが…
+or commands that return binary.
 
 ```
->>> *LRN?
-POSITION2 -6.4E0;:MEASUREMENT:MEAS1:TYPE PWIDTH;SOURCE CH1;:MEASUREMENT:MEAS2…(省略)
-```
-
-それでも、応答が得られるまで (正確には、`usbtmc.ask()`が返るまで) はメインスレッドがブロックされてしまいます。`KeyboardInterrupt` もいい感じに補足しづらいため、シェルとしても操作感がよくありません。
-
-### asyncioによる非同期処理
-
-この問題を解決するために、TMCデバイスとの通信処理を全て非同期処理として実行することを考えます。
-
-`usbtmc.Instrument` で定義されている関数 `read` や `write`、`ask` 等の関数は `async def` な関数ではないので、ただ `await instrument.ask()` とするだけでは結局スレッドがブロックされてしまいます(1敗)。
-そこで、`asyncio` の関数 `run_in_executor` によりこれら関数を非同期コンテキストで呼び出すように変更します。
-
-```python
-ask_task = event_loop.run_in_executor(None, instrument.ask, command)
-```
-
-このように記述することで、TMCデバイスのI/Oでメインスレッドがブロックされるのを防ぐことができます。
-また `ask_task` は `asyncio.Future` ですので、 `.done()` を見ることで通信が完了したかどうかを取得でき、また `.result()` により 本来の `usbtmc.Instrument.ask` の戻り値を得ることができます。
-
-さらに、このような関数を作り…
-
-```python
-async def console_wait_anim(task: asyncio.Future):
-    """引数に与えられたFutureが完了するまでコンソールでアニメーションする
-
-    Args:
-        task (asyncio.Future): 待機対象のFuture
-    """
-    keyframe_max = 4
-    keyframe_index = 0
-
-    while not task.done():
-        keyframe_index = (keyframe_index + 1) % keyframe_max
-        indicator = "." * keyframe_index + " " * (keyframe_max - 1 - keyframe_index)
-        print(f"{indicator}\r", end="")
-        await asyncio.sleep(0.1)
-
-    print(f"{' ' * keyframe_max}\r", end="")
-```
-
-引数に先程の `ask_task` を渡して `await` すれば、通信中にちょっとしたインジケータを表示することも可能です。
-
-※イメージ
-
-コマンド送信直後
-
-```
->>> *LRN?
+>>> DATA:SOURCE?
+CH2
+>>> DATA:SOURCE CH1
+>>> CURVE?
+0000: 23 34 32 35 30 30 81 81 80 80 80 80 80 81 80 81
+0001: 81 81 80 80 80 80 80 81 80 80 80 81 80 81 80 81
+0002: 80 80 80 80 81 80 81 80 80 80 80 81 81 80 80 80
+0003: 80 81 80 80 80 81 80 80 80 80 81 80 80 81 81 80
+0004: 80 81 80 81 81 81 81 80 80 81 80 80 81 80 80 80
+0005: 80 80 81 80 80 80 81 80 80 80 80 81 81 80 80 80
+0006: 80 80 80 81 80 80 80 81 80 81 80 80 80 80 80 80
+0007: 81 81 80 81 80 81 80 80 80 80 80 81 80 81 80 81
+0008: 80 81 80 80 80 80 81 80 80 80 80 80 81 80 80 80
+0009: 81 80 80 81 80 80 81 81 81 81 81 80 80 81 81 80
 ...
 ```
-
-↓ 完了
-
-```
->>> *LRN?
-:HEADER 0;:VERBOSE 1;:DATA …(省略)
-```
-
 
 ## License
 

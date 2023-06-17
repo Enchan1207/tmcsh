@@ -1,5 +1,5 @@
 #
-#
+# tmc_shell CLI
 #
 import sys
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -8,11 +8,14 @@ from typing import Optional
 import usb
 import usbtmc
 
-from device_chooser import choose_tmc_device
-from tmc_callbacks import did_receive_response, did_send_command
+from . import version
+from .device_chooser import choose_tmc_device
+from .tmc_callbacks import did_receive_response, did_send_command
 
 
 def main() -> int:
+    print(f"USB-TMC shell {version}")
+
     # 通信対象の選択
     device: Optional[usb.core.Device] = choose_tmc_device()
     if device is None:
