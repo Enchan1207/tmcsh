@@ -51,7 +51,7 @@ def main() -> int:
         # コマンドが '?' で終わるなら、レスポンスを期待する
         is_command_require_response = command.endswith("?")
         if is_command_require_response:
-            read_response_future: Future = tmc_command_executor.submit(instrument.read)
+            read_response_future: Future = tmc_command_executor.submit(instrument.read_raw)
             read_response_future.add_done_callback(did_receive_response)
 
     # 終了
