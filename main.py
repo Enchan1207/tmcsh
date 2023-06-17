@@ -3,12 +3,13 @@
 #
 import sys
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Optional, Union
+from typing import Optional
 
 import usb
 import usbtmc
 
 from device_chooser import choose_tmc_device
+from tmc_callbacks import did_receive_response, did_send_command
 
 
 def main() -> int:
@@ -44,29 +45,20 @@ def main() -> int:
             continue
 
         # コマンドをエグゼキュータに投げる
-        response_future: Future = tmc_command_executor.submit(instrument.ask, command)
-        response_future.add_done_callback(on_receive_response)
+        command_send_future: Future = tmc_command_executor.submit(instrument.write, command)
+        command_send_future.add_done_callback(did_send_command)
+
+        # コマンドが '?' で終わるなら、レスポンスを期待する
+        is_command_require_response = command.endswith("?")
+        if is_command_require_response:
+            read_response_future: Future = tmc_command_executor.submit(instrument.read)
+            read_response_future.add_done_callback(did_receive_response)
 
     # 終了
     print("Closing...")
     tmc_command_executor.shutdown()
     instrument.close()
     return 0
-
-
-def on_receive_response(response_future: Future[Union[list, str, bytes]]):
-    """受信完了時のコールバック
-
-    Args:
-        future (Future): エグゼキュータに投げたFutureオブジェクト
-    """
-    try:
-        result = response_future.result()
-        print(result)
-    except usb.core.USBTimeoutError:
-        print("Response timed out. please check command syntax or connection.")
-    except (usbtmc.usbtmc.UsbtmcException, usb.core.USBError) as unexpected_error:
-        print(f"Unexpected USB error: {unexpected_error}")
 
 
 if __name__ == "__main__":
