@@ -1,0 +1,40 @@
+#
+# Publish package to PyPI when release is created
+#
+
+name: Publish to PyPI when released
+
+on:
+  release:
+    types:
+      - released
+
+jobs:
+  pypi-publish:
+    name: Upload release to TestPyPI
+    runs-on: ubuntu-latest
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tmcsh
+
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: "master"
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install pypa/build
+        run: python -m pip install build --user
+
+      - name: Build a binary wheel and a source tarball
+        run: python -m build --sdist --wheel --outdir dist/
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
