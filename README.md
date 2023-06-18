@@ -6,10 +6,10 @@ Interactive command shell for USB Test and Measurement device Class (TMC) device
 
 ## Installation
 
-It can be installed from GitHub using pip:
+It can be installed from PyPI using pip:
 
 ```
-pip install git+https://github.com/Enchan1207/tmcsh
+pip install tmcsh
 ```
 
 After installation, command `tmcsh` will be available.
